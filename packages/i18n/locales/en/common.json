@@ -693,6 +693,8 @@
   "incorrect_email_password": "Email or password is incorrect.",
   "compliance": "Compliance",
   "compliance_description": "Access compliance documents, certifications, and data protection agreements",
+  "connected_apps": "Connected Apps",
+  "connected_apps_description": "Manage third-party apps connected to your account and revoke access at any time",
   "data_privacy": "Data privacy",
   "data_protection_agreement": "Data Protection Agreement",
   "dpa_description": "Sign our Data Processing Agreement for GDPR compliance",
