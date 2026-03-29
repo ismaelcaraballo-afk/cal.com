@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 
 import { useLocale } from "@calcom/lib/hooks/useLocale";
@@ -46,19 +47,21 @@ function CredentialRow({
   credentialId: number;
   onRevoke: (id: number, appName: string) => void;
 }) {
-  const categoryLabel = app.type
+  const cleaned = app.type
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace(/ (Calendar|Video|Payment|Crm|Automation)$/i, "");
+    .replace(/ (Calendar|Video|Payment|Crm|Automation)$/i, "")
+    .trim();
+  const categoryLabel = cleaned || app.type;
 
   return (
     <div className="flex items-center justify-between px-4 py-4 sm:px-6">
       <div className="flex items-center gap-3">
         {app.logo ? (
-          <img src={app.logo} alt={app.name} className="h-9 w-9 rounded-md object-contain" />
+          <Image src={app.logo} alt={app.name} width={36} height={36} className="rounded-md object-contain" />
         ) : (
           <div className="bg-subtle flex h-9 w-9 items-center justify-center rounded-md text-xs font-bold uppercase">
-            {app.name.slice(0, 2)}
+            {Array.from(app.name).slice(0, 2).join("")}
           </div>
         )}
         <div>
@@ -68,7 +71,7 @@ function CredentialRow({
               {categoryLabel}
             </Badge>
           </div>
-          <p className="text-subtle text-xs">Credential ID: {credentialId}</p>
+          <p className="text-subtle text-xs">{categoryLabel}</p>
         </div>
       </div>
       <Button color="destructive" size="sm" onClick={() => onRevoke(credentialId, app.name)}>
@@ -85,25 +88,27 @@ export default function ConnectedAppsView() {
   const utils = trpc.useUtils();
   const [revoking, setRevoking] = useState<{ id: number; appName: string } | null>(null);
 
-  const { data, isPending } = trpc.viewer.apps.integrations.useQuery({ onlyInstalled: true });
+  const { data, isPending, isError } = trpc.viewer.apps.integrations.useQuery({ onlyInstalled: true });
 
   const mutation = trpc.viewer.credentials.delete.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       showToast(t("app_removed_successfully"), "success");
       setRevoking(null);
-      utils.viewer.apps.integrations.invalidate();
-      utils.viewer.calendars.connectedCalendars.invalidate();
+      await Promise.all([
+        utils.viewer.apps.integrations.invalidate(),
+        utils.viewer.calendars.connectedCalendars.invalidate(),
+      ]);
     },
     onError: () => {
       showToast(t("error_removing_app"), "error");
-      setRevoking(null);
     },
   });
 
   if (isPending) return <SkeletonLoader />;
+  if (isError) return <EmptyScreen Icon="alert-triangle" headline={t("something_went_wrong")} description={t("error_loading_connected_apps")} />;
 
   // Flatten: one row per credential across all installed apps
-  const rows = data?.items.flatMap((app) =>
+  const rows = data?.items?.flatMap((app) =>
     (app.credentials ?? []).map((cred) => ({ app, credentialId: cred.id }))
   ) ?? [];
 
@@ -120,7 +125,7 @@ export default function ConnectedAppsView() {
           <div className="divide-subtle divide-y">
             {rows.map(({ app, credentialId }) => (
               <CredentialRow
-                key={credentialId}
+                key={`${app.slug}-${credentialId}`}
                 app={app}
                 credentialId={credentialId}
                 onRevoke={(id, appName) => setRevoking({ id, appName })}
@@ -130,7 +135,7 @@ export default function ConnectedAppsView() {
         )}
       </div>
 
-      <Dialog open={!!revoking} onOpenChange={() => setRevoking(null)}>
+      <Dialog open={!!revoking} onOpenChange={(open) => { if (!open && !mutation.isPending) setRevoking(null); }}>
         <DialogContent
           title={`Revoke ${revoking?.appName ?? "app"} access`}
           description="This will disconnect the app from your account. You can reconnect it at any time from the App Store.">
