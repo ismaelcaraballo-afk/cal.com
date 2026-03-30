@@ -42,11 +42,14 @@ function CredentialRow({
   app,
   credentialId,
   onRevoke,
+  disabled,
 }: {
   app: IntegrationItem;
   credentialId: number;
   onRevoke: (id: number, appName: string) => void;
+  disabled: boolean;
 }) {
+  const { t } = useLocale();
   const cleaned = app.type
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
@@ -58,7 +61,14 @@ function CredentialRow({
     <div className="flex items-center justify-between px-4 py-4 sm:px-6">
       <div className="flex items-center gap-3">
         {app.logo ? (
-          <Image src={app.logo} alt={app.name} width={36} height={36} className="rounded-md object-contain" />
+          <Image
+            src={app.logo}
+            alt={app.name}
+            width={36}
+            height={36}
+            className="rounded-md object-contain"
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
         ) : (
           <div className="bg-subtle flex h-9 w-9 items-center justify-center rounded-md text-xs font-bold uppercase">
             {Array.from(app.name).slice(0, 2).join("")}
@@ -74,8 +84,13 @@ function CredentialRow({
           <p className="text-subtle text-xs">{categoryLabel}</p>
         </div>
       </div>
-      <Button color="destructive" size="sm" onClick={() => onRevoke(credentialId, app.name)}>
-        Revoke
+      <Button
+        color="destructive"
+        size="sm"
+        disabled={disabled}
+        aria-label={t("revoke_app_access_aria", { appName: app.name })}
+        onClick={() => onRevoke(credentialId, app.name)}>
+        {t("revoke")}
       </Button>
     </div>
   );
@@ -88,29 +103,44 @@ export default function ConnectedAppsView() {
   const utils = trpc.useUtils();
   const [revoking, setRevoking] = useState<{ id: number; appName: string } | null>(null);
 
-  const { data, isPending, isError } = trpc.viewer.apps.integrations.useQuery({ onlyInstalled: true });
+  const { data, isPending, isError, refetch } = trpc.viewer.apps.integrations.useQuery({ onlyInstalled: true });
 
   const mutation = trpc.viewer.credentials.delete.useMutation({
     onSuccess: async () => {
       showToast(t("app_removed_successfully"), "success");
       setRevoking(null);
-      await Promise.all([
+      // allSettled so one failing invalidation doesn't suppress the other
+      await Promise.allSettled([
         utils.viewer.apps.integrations.invalidate(),
         utils.viewer.calendars.connectedCalendars.invalidate(),
       ]);
     },
     onError: () => {
       showToast(t("error_removing_app"), "error");
+      setRevoking(null); // reset so dialog doesn't get stuck open on error
     },
   });
 
   if (isPending) return <SkeletonLoader />;
-  if (isError) return <EmptyScreen Icon="alert-triangle" headline={t("something_went_wrong")} description={t("error_loading_connected_apps")} />;
+  if (isError)
+    return (
+      <EmptyScreen
+        Icon="alert-triangle"
+        headline={t("something_went_wrong")}
+        description={t("error_loading_connected_apps")}
+        buttonText={t("retry")}
+        buttonOnClick={() => refetch()}
+      />
+    );
 
-  // Flatten: one row per credential across all installed apps
-  const rows = data?.items?.flatMap((app) =>
-    (app.credentials ?? []).map((cred) => ({ app, credentialId: cred.id }))
-  ) ?? [];
+  // Flatten: one row per credential across all installed apps.
+  // Filter out any credentials missing a numeric id to avoid type issues.
+  const rows =
+    data?.items?.flatMap((app) =>
+      (app.credentials ?? [])
+        .filter((cred): cred is typeof cred & { id: number } => typeof cred.id === "number")
+        .map((cred) => ({ app, credentialId: cred.id }))
+    ) ?? [];
 
   return (
     <>
@@ -118,8 +148,8 @@ export default function ConnectedAppsView() {
         {rows.length === 0 ? (
           <EmptyScreen
             Icon="link"
-            headline="No connected apps"
-            description="Apps you connect from the App Store will appear here. You can revoke access at any time."
+            headline={t("no_connected_apps")}
+            description={t("no_connected_apps_description")}
           />
         ) : (
           <div className="divide-subtle divide-y">
@@ -128,6 +158,7 @@ export default function ConnectedAppsView() {
                 key={`${app.slug}-${credentialId}`}
                 app={app}
                 credentialId={credentialId}
+                disabled={mutation.isPending}
                 onRevoke={(id, appName) => setRevoking({ id, appName })}
               />
             ))}
@@ -135,17 +166,26 @@ export default function ConnectedAppsView() {
         )}
       </div>
 
-      <Dialog open={!!revoking} onOpenChange={(open) => { if (!open && !mutation.isPending) setRevoking(null); }}>
+      <Dialog
+        open={!!revoking}
+        onOpenChange={(open) => {
+          // Prevent closing while mutation is in-flight or during cache invalidation
+          if (!open && !mutation.isPending && !mutation.isSuccess) setRevoking(null);
+        }}>
         <DialogContent
-          title={`Revoke ${revoking?.appName ?? "app"} access`}
-          description="This will disconnect the app from your account. You can reconnect it at any time from the App Store.">
+          title={t("revoke_app_access", { appName: revoking?.appName ?? t("app") })}
+          description={t("revoke_app_access_description")}>
           <DialogFooter>
-            <DialogClose />
+            <DialogClose asChild>
+              <Button color="secondary" disabled={mutation.isPending}>
+                {t("cancel")}
+              </Button>
+            </DialogClose>
             <Button
               color="destructive"
               loading={mutation.isPending}
               onClick={() => revoking && mutation.mutate({ id: revoking.id })}>
-              Yes, revoke access
+              {t("yes_revoke_access")}
             </Button>
           </DialogFooter>
         </DialogContent>
