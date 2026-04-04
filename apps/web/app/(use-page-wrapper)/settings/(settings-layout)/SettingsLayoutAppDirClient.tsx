@@ -116,6 +116,11 @@ const getTabs = (orgBranding: OrganizationBranding | null) => {
           href: "/settings/security/compliance",
           trackingMetadata: { section: "security", page: "compliance" },
         },
+        {
+          name: "connected_apps",
+          href: "/settings/security/connected-apps",
+          trackingMetadata: { section: "security", page: "connected_apps" },
+        },
       ],
     },
     {
