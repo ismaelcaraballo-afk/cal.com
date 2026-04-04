@@ -15,6 +15,14 @@ import { showToast } from "@calcom/ui/components/toast";
 
 type IntegrationItem = RouterOutputs["viewer"]["apps"]["integrations"]["items"][number];
 
+// lastUsedAt / isStale are added by Beatrice's schema + Joel's status computation.
+// They may not yet be in the tRPC router type — use an augmented credential type.
+type CredentialWithStatus = IntegrationItem["credentials"][number] & {
+  id: number;
+  lastUsedAt?: string | null;
+  isStale?: boolean;
+};
+
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 const SkeletonLoader = () => (
@@ -38,14 +46,20 @@ const SkeletonLoader = () => (
 
 // ─── Single app row ───────────────────────────────────────────────────────────
 
+const daysSince = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
 function CredentialRow({
   app,
   credentialId,
+  lastUsedAt,
+  isStale,
   onRevoke,
   disabled,
 }: {
   app: IntegrationItem;
   credentialId: number;
+  lastUsedAt?: string | null;
+  isStale?: boolean;
   onRevoke: (id: number, appName: string) => void;
   disabled: boolean;
 }) {
@@ -56,6 +70,9 @@ function CredentialRow({
     .replace(/ (Calendar|Video|Payment|Crm|Automation)$/i, "")
     .trim();
   const categoryLabel = cleaned || app.type;
+  const lastUsedLabel = lastUsedAt
+    ? t("last_used_n_days_ago", { count: daysSince(lastUsedAt) })
+    : t("never_used");
 
   return (
     <div className="flex items-center justify-between px-4 py-4 sm:px-6">
@@ -80,8 +97,13 @@ function CredentialRow({
             <Badge variant="gray" size="sm">
               {categoryLabel}
             </Badge>
+            {isStale && (
+              <Badge variant="orange" size="sm" data-testid="stale-badge">
+                {t("stale")}
+              </Badge>
+            )}
           </div>
-          <p className="text-subtle text-xs">{categoryLabel}</p>
+          <p className="text-subtle text-xs">{lastUsedLabel}</p>
         </div>
       </div>
       <Button
@@ -138,8 +160,13 @@ export default function ConnectedAppsView() {
   const rows =
     data?.items?.flatMap((app) =>
       (app.credentials ?? [])
-        .filter((cred): cred is typeof cred & { id: number } => typeof cred.id === "number")
-        .map((cred) => ({ app, credentialId: cred.id }))
+        .filter((cred): cred is CredentialWithStatus => typeof cred.id === "number")
+        .map((cred) => ({
+          app,
+          credentialId: cred.id,
+          lastUsedAt: cred.lastUsedAt ?? null,
+          isStale: cred.isStale ?? false,
+        }))
     ) ?? [];
 
   return (
@@ -153,11 +180,13 @@ export default function ConnectedAppsView() {
           />
         ) : (
           <div className="divide-subtle divide-y">
-            {rows.map(({ app, credentialId }) => (
+            {rows.map(({ app, credentialId, lastUsedAt, isStale }) => (
               <CredentialRow
                 key={`${app.slug}-${credentialId}`}
                 app={app}
                 credentialId={credentialId}
+                lastUsedAt={lastUsedAt}
+                isStale={isStale}
                 disabled={mutation.isPending}
                 onRevoke={(id, appName) => setRevoking({ id, appName })}
               />
